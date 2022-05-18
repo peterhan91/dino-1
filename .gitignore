@@ -4,6 +4,7 @@
 # Byte-compiled
 _pycache__/
 dino_out/
+dummy/
 .ipynb_checkpoints/
 .cache/
 .idea/
