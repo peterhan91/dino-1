@@ -63,10 +63,11 @@ def eval_linear(args):
 
     # ============ preparing data ... ============
     val_transform = pth_transforms.Compose([
-        pth_transforms.Resize(256, interpolation=3),
-        pth_transforms.CenterCrop(224),
+        pth_transforms.Resize(512, interpolation=3),
+        pth_transforms.CenterCrop(512),
         pth_transforms.ToTensor(),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        # pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        pth_transforms.Normalize((0.389, 0.254, 0.169), (0.251, 0.170 , 0.117))
     ])
     dataset_val = datasets.ImageFolder(os.path.join(args.data_path, "val"), transform=val_transform)
     val_loader = torch.utils.data.DataLoader(
@@ -83,10 +84,11 @@ def eval_linear(args):
         return
 
     train_transform = pth_transforms.Compose([
-        pth_transforms.RandomResizedCrop(224),
+        pth_transforms.RandomResizedCrop(512),
         pth_transforms.RandomHorizontalFlip(),
         pth_transforms.ToTensor(),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        # pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        pth_transforms.Normalize((0.389, 0.254, 0.169), (0.251, 0.170 , 0.117))
     ])
     dataset_train = datasets.ImageFolder(os.path.join(args.data_path, "train"), transform=train_transform)
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)

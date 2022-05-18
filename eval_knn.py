@@ -14,6 +14,8 @@
 import os
 import sys
 import argparse
+import numpy as np
+from sklearn.metrics import confusion_matrix, classification_report
 
 import torch
 from torch import nn
@@ -25,18 +27,22 @@ from torchvision import models as torchvision_models
 
 import utils
 import vision_transformer as vits
+from dataset.dataset import PatchLabelDataset
 
 
 def extract_feature_pipeline(args):
     # ============ preparing data ... ============
     transform = pth_transforms.Compose([
-        pth_transforms.Resize(256, interpolation=3),
-        pth_transforms.CenterCrop(224),
+        pth_transforms.Resize(512, interpolation=3), # should we use 256 or 512?
+        pth_transforms.CenterCrop(512),
         pth_transforms.ToTensor(),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        # pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        pth_transforms.Normalize((0.389, 0.254, 0.169), (0.251, 0.170 , 0.117))
     ])
-    dataset_train = ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
-    dataset_val = ReturnIndexDataset(os.path.join(args.data_path, "val"), transform=transform)
+    # dataset_train = ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
+    # dataset_val = ReturnIndexDataset(os.path.join(args.data_path, "val"), transform=transform)
+    dataset_train = ReturnIndexDataset_(os.path.join(args.data_path, "train"), fold='train', transform=transform)
+    dataset_val = ReturnIndexDataset_(os.path.join(args.data_path, "test"), fold='test', transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -81,8 +87,10 @@ def extract_feature_pipeline(args):
         train_features = nn.functional.normalize(train_features, dim=1, p=2)
         test_features = nn.functional.normalize(test_features, dim=1, p=2)
 
-    train_labels = torch.tensor([s[-1] for s in dataset_train.samples]).long()
-    test_labels = torch.tensor([s[-1] for s in dataset_val.samples]).long()
+    # train_labels = torch.tensor([s[-1] for s in dataset_train.samples]).long()
+    # test_labels = torch.tensor([s[-1] for s in dataset_val.samples]).long()
+    train_labels = torch.tensor([s for s in dataset_train.df['score'].tolist()]).long()
+    test_labels = torch.tensor([s for s in dataset_val.df['score'].tolist()]).long()
     # save features and labels
     if args.dump_features and dist.get_rank() == 0:
         torch.save(train_features.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
@@ -146,6 +154,7 @@ def knn_classifier(train_features, train_labels, test_features, test_labels, k, 
     num_test_images, num_chunks = test_labels.shape[0], 100
     imgs_per_chunk = num_test_images // num_chunks
     retrieval_one_hot = torch.zeros(k, num_classes).to(train_features.device)
+    y_pred, y_true = [], []
     for idx in range(0, num_test_images, imgs_per_chunk):
         # get the features for test images
         features = test_features[
@@ -171,14 +180,22 @@ def knn_classifier(train_features, train_labels, test_features, test_labels, k, 
             1,
         )
         _, predictions = probs.sort(1, True)
-
+        
         # find the predictions that match the target
         correct = predictions.eq(targets.data.view(-1, 1))
         top1 = top1 + correct.narrow(1, 0, 1).sum().item()
         top5 = top5 + correct.narrow(1, 0, min(5, k)).sum().item()  # top5 does not make sense if k < 5
         total += targets.size(0)
+        y_pred.extend(predictions.cpu().tolist())
+        y_true.extend(targets.cpu().tolist())
+    
     top1 = top1 * 100.0 / total
     top5 = top5 * 100.0 / total
+    # print(np.array(y_true).shape, np.array(y_pred).shape)
+    # print(y_true[:2], y_pred[:2])
+    cm = classification_report(np.array(y_true), np.array(y_pred)[:,0])
+    print(cm)
+
     return top1, top5
 
 
@@ -187,11 +204,17 @@ class ReturnIndexDataset(datasets.ImageFolder):
         img, lab = super(ReturnIndexDataset, self).__getitem__(idx)
         return img, idx
 
+class ReturnIndexDataset_(PatchLabelDataset):
+    def __getitem__(self, idx):
+        img, lab = super(ReturnIndexDataset_, self).__getitem__(idx)
+        return img, idx
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluation with weighted k-NN on ImageNet')
     parser.add_argument('--batch_size_per_gpu', default=128, type=int, help='Per-GPU batch-size')
-    parser.add_argument('--nb_knn', default=[10, 20, 100, 200], nargs='+', type=int,
+    parser.add_argument('--nb_knn', default=[5, 10, 20, 50], nargs='+', type=int,
         help='Number of NN to use. 20 is usually working the best.')
     parser.add_argument('--temperature', default=0.07, type=float,
         help='Temperature used in the voting coefficient')
@@ -202,7 +225,7 @@ if __name__ == '__main__':
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument("--checkpoint_key", default="teacher", type=str,
         help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument('--dump_features', default=None,
+    parser.add_argument('--dump_features', default='./dummy',
         help='Path where to save computed features, empty for no saving')
     parser.add_argument('--load_features', default=None, help="""If the features have
         already been computed, where to find them.""")
@@ -237,6 +260,6 @@ if __name__ == '__main__':
         print("Features are ready!\nStart the k-NN classification.")
         for k in args.nb_knn:
             top1, top5 = knn_classifier(train_features, train_labels,
-                test_features, test_labels, k, args.temperature)
+                test_features, test_labels, k, args.temperature, 5)
             print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
     dist.barrier()

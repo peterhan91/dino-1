@@ -1,0 +1,5 @@
+
+-- train --
+python -m torch.distributed.launch --nproc_per_node=3 main_dino.py --data_path /home/titanrt/datasets/img_512/train --output_dir dino_out/ --batch_size_per_gpu 96 --epochs 800 --num_workers 24
+
+--test--
