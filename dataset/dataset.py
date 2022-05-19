@@ -30,7 +30,7 @@ class PatchDataset(Dataset):
 
 
 class PatchLabelDataset(Dataset):
-    def __init__(self, path_to_images, csv_path='./csv/diabetic.csv', fold='train', sample=0, transform=None):
+    def __init__(self, path_to_images, csv_path='./csv/diabetic_val.csv', fold='train', sample=0, transform=None):
 
         self.transform = transform
         self.path_to_images = path_to_images
