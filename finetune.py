@@ -82,13 +82,18 @@ def eval_linear(args):
     if args.evaluate:
         utils.load_pretrained_linear_weights(linear_classifier, args.arch, args.patch_size)
         test_stats = validate_network(val_loader, model, linear_classifier, args.n_last_blocks, args.avgpool_patchtokens)
-        print(f"loss of the network on the {len(dataset_val)} test images: {test_stats.loss:.1f}%")
+        print(f"loss of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
 
     train_transform = pth_transforms.Compose([ 
-        pth_transforms.RandomRotation(12),
-        pth_transforms.RandomResizedCrop(512),
         pth_transforms.RandomHorizontalFlip(),
+        pth_transforms.RandomRotation(25),
+        pth_transforms.ColorJitter(brightness=0.25, contrast=0.25, 
+                            saturation=0.25, hue=0.25),
+        pth_transforms.RandomAffine(25, translate=(0.2, 0.2), 
+                            scale=(0.8,1.2), 
+                            shear=10),  
+        pth_transforms.RandomResizedCrop(512),
         pth_transforms.ToTensor(),
         # pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         pth_transforms.Normalize((0.389, 0.254, 0.169), (0.251, 0.170 , 0.117))
@@ -115,7 +120,7 @@ def eval_linear(args):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
 
     # Optionally resume from a checkpoint
-    to_restore = {"epoch": 0, "best_acc": 0., 'best_loss': 999.}
+    to_restore = {"epoch": 0, "best_acc": 0.}
     utils.restart_from_checkpoint(
         os.path.join(args.output_dir, "checkpoint.pth.tar"),
         run_variables=to_restore,
@@ -125,7 +130,7 @@ def eval_linear(args):
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
-    best_loss = to_restore['best_loss']
+    # best_loss = to_restore['best_loss']
 
     for epoch in range(start_epoch, args.epochs):
         train_loader.sampler.set_epoch(epoch)
@@ -137,8 +142,8 @@ def eval_linear(args):
         if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
             test_stats = validate_network(val_loader, model, linear_classifier, args.n_last_blocks, args.avgpool_patchtokens)
             best_acc = max(best_acc, test_stats["acc1"])
-            best_loss = min(best_loss, test_stats.loss)
-            print(f'Best loss so far: {best_loss:.3f}%')
+            # best_loss = min(best_loss, test_stats.loss)
+            # print(f'Best loss so far: {best_loss:.3f}%')
             log_stats = {**{k: v for k, v in log_stats.items()}, **{f'test_{k}': v for k, v in test_stats.items()}}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -149,7 +154,7 @@ def eval_linear(args):
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "best_acc": best_acc,
-                "best_loss": best_loss
+            #     "best_loss": best_loss
             }
             torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
     print("Training of the supervised linear classifier on frozen features completed.\n"
